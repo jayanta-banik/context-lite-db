@@ -115,7 +115,7 @@ model notes {
 ```
 
 ```python
-from ContextDB import ContextDB
+from context_lite_db import ContextDB
 
 db = ContextDB("context.db", embedding_provider="callable", embedding_fn=lambda text: [0.0])
 db.apply_schema("context.schema")

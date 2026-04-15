@@ -9,7 +9,7 @@ pip install context-lite-db
 For the standalone Rust/CLI engine from this repository:
 
 ```bash
-cargo build --manifest-path /home/runner/work/context-lite-db/context-lite-db/crates/contextdb/Cargo.toml --release --target-dir /home/runner/work/context-lite-db/context-lite-db/target
+cargo build --manifest-path crates/contextdb/Cargo.toml --release --target-dir target
 ```
 
 For the built-in `sentence-transformers` embedding provider (downloads a
@@ -24,7 +24,7 @@ pip install "context-lite-db[sentence-transformers]"
 ## Opening a database
 
 ```python
-from ContextDB import ContextDB
+from context_lite_db import ContextDB
 
 # Persistent file
 db = ContextDB("mydb.db")
