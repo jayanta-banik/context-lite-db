@@ -11,6 +11,10 @@ build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+target/
+crates/contextdb/target/
+node_modules/
+packages/contextdb-js/node_modules/
 
 # Virtual environments
 .venv/
