@@ -6,6 +6,12 @@
 pip install context-lite-db
 ```
 
+For the standalone Rust/CLI engine from this repository:
+
+```bash
+cargo build --manifest-path /home/runner/work/context-lite-db/context-lite-db/crates/contextdb/Cargo.toml --release --target-dir /home/runner/work/context-lite-db/context-lite-db/target
+```
+
 For the built-in `sentence-transformers` embedding provider (downloads a
 small model on first use):
 
@@ -81,6 +87,26 @@ ctx = db.rag.build_context("What is Python used for?")
 print(ctx[:200])
 
 db.close()
+```
+
+## Applying `context.schema`
+
+```prisma
+model articles {
+  id        Int      @id
+  title     String
+  body      String?
+  author    String
+  createdAt DateTime @default(now())
+}
+```
+
+```python
+from ContextDB import ContextDB
+
+db = ContextDB("schema-first.db", embedding_provider="callable", embedding_fn=lambda text: [0.0])
+db.apply_schema("context.schema")
+db.articles.create({"title": "Hello", "body": "World", "author": "Alice"})
 ```
 
 ---

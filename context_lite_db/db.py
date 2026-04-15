@@ -7,6 +7,8 @@ context_lite_db – core database module.
   helpers ``create_table``, ``insert``, ``update``, ``delete``.
 * **Prisma-style table access** – ``db.table_name.create(...)``,
   ``db.table_name.find_all()``, etc.
+* **Schema-first workflows** – ``db.apply_schema("context.schema")`` delegates
+  table creation to the standalone Rust ``contextdb`` engine.
 * **Semantic search** – ``add_document`` + ``semantic_search``.
 * **Knowledge graph** – ``add_triple``, ``remove_triple``, ``graph_query``,
   ``graph_traverse``.
@@ -21,14 +23,23 @@ context_lite_db – core database module.
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 from .embeddings import EmbeddingProvider
 from .knowledge_graph import KnowledgeGraph
+from .native import NativeContextDBClient
 from .rag import RAGEngine
 from .seed import SeedResult, load_seed
 from .table_proxy import TableProxy
 from .vector_store import VectorStore
+
+
+@dataclass
+class ExecutionResult:
+    """Minimal execute result for native-backed relational operations."""
+
+    rowcount: int = -1
 
 
 class ContextDB:
@@ -56,16 +67,11 @@ class ContextDB:
     embedding_fn:
         Custom callable ``(text: str) -> list[float]`` used when
         *embedding_provider* is ``"callable"``.
-
-    Examples
-    --------
-    >>> db = ContextDB(":memory:", embedding_provider="callable",
-    ...                embedding_fn=lambda t: [0.0] * 8)
-    >>> db.create_table("notes", {"title": "TEXT", "body": "TEXT"})
-    >>> db.notes.create({"title": "Hello", "body": "World"})
-    >>> db.add_triple("Alice", "wrote", "Hello")
-    >>> db.add_document("doc1", "Hello World", metadata={"author": "Alice"})
-    >>> results = db.semantic_search("greeting")
+    relational_backend:
+        ``"auto"`` uses the Rust standalone engine for file-backed databases and
+        keeps pure-Python SQLite for ``":memory:"``.  Set to ``"python"`` to
+        force the legacy in-process path or ``"native"`` to require the Rust
+        engine.
     """
 
     def __init__(
@@ -74,8 +80,18 @@ class ContextDB:
         embedding_provider: str = "sentence-transformers",
         embedding_model: str = "all-MiniLM-L6-v2",
         embedding_fn: Optional[Callable[[str], List[float]]] = None,
+        relational_backend: Literal["auto", "python", "native"] = "auto",
     ) -> None:
+        if relational_backend not in {"auto", "python", "native"}:
+            raise ValueError(
+                "relational_backend must be one of 'auto', 'python', or 'native'"
+            )
+        if relational_backend == "native" and path == ":memory:":
+            raise ValueError("The native relational backend requires a file path")
+
         self._path = path
+        self._relational_backend = relational_backend
+        self._native_client: Optional[NativeContextDBClient] = None
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
 
@@ -120,15 +136,34 @@ class ContextDB:
     # Relational helpers
     # ------------------------------------------------------------------
 
+    def _uses_native_relational(self) -> bool:
+        return self._path != ":memory:" and self._relational_backend in {
+            "auto",
+            "native",
+        }
+
+    def _native(self) -> NativeContextDBClient:
+        if not self._uses_native_relational():
+            raise RuntimeError("The native relational backend is not active")
+        if self._native_client is None:
+            self._native_client = NativeContextDBClient(self._path)
+        return self._native_client
+
     def execute(
         self, sql: str, params: Union[List, Tuple, None] = None
-    ) -> sqlite3.Cursor:
-        """Execute raw SQL and return the cursor.
+    ) -> Union[sqlite3.Cursor, ExecutionResult]:
+        """Execute raw SQL and return the cursor/result.
 
         Automatically commits for DML/DDL statements.
         """
+        if self._uses_native_relational():
+            result = self._native().execute(sql, list(params or []))
+            return ExecutionResult(rowcount=int(result.get("rows_affected", -1)))
+
         cur = self._conn.execute(sql, params or [])
-        if sql.strip().upper().startswith(("INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER")):
+        if sql.strip().upper().startswith(
+            ("INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER")
+        ):
             self._conn.commit()
         return cur
 
@@ -136,6 +171,9 @@ class ContextDB:
         self, sql: str, params: Union[List, Tuple, None] = None
     ) -> List[Dict[str, Any]]:
         """Execute a SELECT query and return results as a list of dicts."""
+        if self._uses_native_relational():
+            return self._native().query(sql, list(params or []))
+
         cur = self._conn.execute(sql, params or [])
         columns = [desc[0] for desc in cur.description]
         return [dict(zip(columns, row)) for row in cur.fetchall()]
@@ -146,19 +184,11 @@ class ContextDB:
         columns: Dict[str, str],
         if_not_exists: bool = True,
     ) -> None:
-        """Create a table with the specified column definitions.
+        """Create a table with the specified column definitions."""
+        if self._uses_native_relational():
+            self._native().create_table(table, columns, if_not_exists=if_not_exists)
+            return
 
-        Parameters
-        ----------
-        table:
-            Table name.
-        columns:
-            Mapping of ``column_name -> SQLite type`` (e.g. ``"TEXT"``,
-            ``"INTEGER"``, ``"REAL"``).  An ``id INTEGER PRIMARY KEY
-            AUTOINCREMENT`` column is added automatically.
-        if_not_exists:
-            Silently skip if the table already exists.
-        """
         col_defs = ", ".join(f"{name} {dtype}" for name, dtype in columns.items())
         guard = "IF NOT EXISTS " if if_not_exists else ""
         self._conn.execute(
@@ -169,6 +199,9 @@ class ContextDB:
 
     def insert(self, table: str, data: Dict[str, Any]) -> int:
         """Insert a row and return the new row *id*."""
+        if self._uses_native_relational():
+            return self._native().insert(table, data)
+
         cols = ", ".join(data.keys())
         placeholders = ", ".join("?" * len(data))
         cur = self._conn.execute(
@@ -178,6 +211,16 @@ class ContextDB:
         self._conn.commit()
         return cur.lastrowid  # type: ignore[return-value]
 
+    def batch_insert(self, table: str, rows: List[Dict[str, Any]]) -> List[int]:
+        """Insert multiple rows in a single transaction."""
+        if self._uses_native_relational():
+            return self._native().batch_insert(table, rows)
+
+        ids: List[int] = []
+        for row in rows:
+            ids.append(self.insert(table, row))
+        return ids
+
     def update(
         self,
         table: str,
@@ -185,10 +228,10 @@ class ContextDB:
         where: str,
         params: Union[List, Tuple, None] = None,
     ) -> int:
-        """Update rows matching *where* with values in *data*.
+        """Update rows matching *where* with values in *data*."""
+        if self._uses_native_relational():
+            return self._native().update(table, data, where, list(params or []))
 
-        Returns the number of rows affected.
-        """
         set_clause = ", ".join(f"{k} = ?" for k in data.keys())
         all_params = list(data.values()) + list(params or [])
         cur = self._conn.execute(
@@ -198,6 +241,21 @@ class ContextDB:
         self._conn.commit()
         return cur.rowcount
 
+    def batch_update(self, table: str, updates: List[Dict[str, Any]]) -> int:
+        """Apply multiple updates in a single transaction."""
+        if self._uses_native_relational():
+            return self._native().batch_update(table, updates)
+
+        total = 0
+        for update in updates:
+            total += self.update(
+                table,
+                update["data"],
+                update["where"],
+                update.get("params") or [],
+            )
+        return total
+
     def delete(
         self,
         table: str,
@@ -205,12 +263,46 @@ class ContextDB:
         params: Union[List, Tuple, None] = None,
     ) -> int:
         """Delete rows matching *where*.  Returns the number of rows deleted."""
+        if self._uses_native_relational():
+            return self._native().delete(table, where, list(params or []))
+
         cur = self._conn.execute(
             f"DELETE FROM {table} WHERE {where}",
             params or [],
         )
         self._conn.commit()
         return cur.rowcount
+
+    def batch_delete(self, table: str, conditions: List[Dict[str, Any]]) -> int:
+        """Apply multiple delete operations in a single transaction."""
+        if self._uses_native_relational():
+            return self._native().batch_delete(table, conditions)
+
+        total = 0
+        for condition in conditions:
+            total += self.delete(
+                table,
+                condition["where"],
+                condition.get("params") or [],
+            )
+        return total
+
+    def apply_schema(self, path: str = "context.schema") -> Dict[str, Any]:
+        """Apply a Prisma-inspired ``context.schema`` file to the database."""
+        if self._uses_native_relational():
+            return self._native().apply_schema(path)
+        raise RuntimeError(
+            "Schema application requires a file-backed database with the native backend"
+        )
+
+    def inspect(self) -> Dict[str, Any]:
+        """Inspect the current relational schema using the standalone engine."""
+        if self._uses_native_relational():
+            return self._native().inspect()
+        tables = self.query(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        )
+        return {"tables": tables}
 
     # ------------------------------------------------------------------
     # Semantic / vector search
@@ -223,24 +315,7 @@ class ContextDB:
         collection: str = "default",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> int:
-        """Embed *text* and store it in the vector store.
-
-        Parameters
-        ----------
-        doc_id:
-            Application-level identifier for this document.
-        text:
-            Text to embed and store.
-        collection:
-            Logical group for this document.
-        metadata:
-            Arbitrary JSON-serialisable metadata.
-
-        Returns
-        -------
-        int
-            The row id in the internal vector table.
-        """
+        """Embed *text* and store it in the vector store."""
         embedding = self._embedder.encode(text)
         return self._vectors.add(
             doc_id=doc_id,
@@ -257,25 +332,7 @@ class ContextDB:
         collection: Optional[str] = None,
         threshold: float = 0.0,
     ) -> List[Dict[str, Any]]:
-        """Find the *top_k* most semantically similar documents to *query*.
-
-        Parameters
-        ----------
-        query:
-            Natural-language query string.
-        top_k:
-            Maximum number of results.
-        collection:
-            Restrict search to this collection (``None`` = all).
-        threshold:
-            Minimum cosine-similarity score.
-
-        Returns
-        -------
-        list[dict]
-            Each dict contains ``doc_id``, ``text``, ``score``,
-            ``collection``, ``metadata``, and ``created_at``.
-        """
+        """Find the *top_k* most semantically similar documents to *query*."""
         query_embedding = self._embedder.encode(query)
         return self._vectors.search(
             query_embedding=query_embedding,
@@ -304,10 +361,7 @@ class ContextDB:
         weight: float = 1.0,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> int:
-        """Add or update a (subject, predicate, object) triple.
-
-        Returns the row *id*.
-        """
+        """Add or update a (subject, predicate, object) triple."""
         return self._graph.add_triple(
             subject=subject,
             predicate=predicate,
@@ -368,17 +422,17 @@ class ContextDB:
     # ------------------------------------------------------------------
 
     def drop_table(self, table: str) -> None:
-        """Drop *table* from the database (irreversible).
-
-        Equivalent to ``db.<table>.drop()``.
-        """
+        """Drop *table* from the database (irreversible)."""
+        if self._uses_native_relational():
+            self._native().drop_table(table)
+            return
         self.execute(f"DROP TABLE IF EXISTS {table}")
 
     def truncate_table(self, table: str) -> None:
-        """Delete every row in *table* without dropping the schema.
-
-        Equivalent to ``db.<table>.truncate()``.
-        """
+        """Delete every row in *table* without dropping the schema."""
+        if self._uses_native_relational():
+            self._native().truncate_table(table)
+            return
         self.execute(f"DELETE FROM {table}")
 
     def seed_table(
@@ -386,77 +440,11 @@ class ContextDB:
         table: str,
         rows: List[Dict[str, Any]],
     ) -> List[int]:
-        """Bulk-insert *rows* into *table* as initial seed data.
-
-        Equivalent to ``db.<table>.seed_table(rows)``.
-
-        Returns
-        -------
-        list[int]
-            The auto-assigned *id* for each inserted row.
-        """
+        """Bulk-insert *rows* into *table* as initial seed data."""
         return TableProxy(self, table).create_many(rows)
 
     def seed(self, path: str) -> SeedResult:
-        """Seed the database from a JSON or YAML file.
-
-        The seed file is a declarative description of the initial database
-        state.  It can create tables, insert rows, add knowledge-graph
-        triples, and embed documents into the vector store – all in a single
-        call.
-
-        Parameters
-        ----------
-        path:
-            Path to the seed file (``.json``, ``.yaml``, or ``.yml``).
-
-        Returns
-        -------
-        SeedResult
-            Summary of what was created/inserted.
-
-        Seed file format (JSON)
-        -----------------------
-        All sections are optional.
-
-        .. code-block:: json
-
-            {
-              "tables": {
-                "users": {
-                  "columns": {"name": "TEXT", "email": "TEXT"},
-                  "rows": [
-                    {"name": "Alice", "email": "alice@example.com"},
-                    {"name": "Bob",   "email": "bob@example.com"}
-                  ]
-                }
-              },
-              "triples": [
-                {"subject": "Alice", "predicate": "knows", "object": "Bob"}
-              ],
-              "documents": [
-                {"doc_id": "doc1", "text": "Alice is an engineer.",
-                 "collection": "bios"}
-              ]
-            }
-
-        Examples
-        --------
-        >>> import json, tempfile, os
-        >>> seed = {"tables": {"items": {"columns": {"name": "TEXT"},
-        ...                              "rows": [{"name": "alpha"}]}}}
-        >>> with tempfile.NamedTemporaryFile(mode="w", suffix=".json",
-        ...                                  delete=False) as f:
-        ...     json.dump(seed, f); path = f.name
-        >>> db = ContextDB(":memory:", embedding_provider="callable",
-        ...                embedding_fn=lambda t: [0.0])
-        >>> result = db.seed(path)
-        >>> result.tables_created
-        ['items']
-        >>> result.rows_inserted
-        {'items': 1}
-        >>> os.unlink(path)
-        """
+        """Seed the database from a JSON or YAML file."""
         return load_seed(self, path)
 
     # ------------------------------------------------------------------

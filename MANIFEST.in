@@ -1,0 +1,3 @@
+include setup.py
+recursive-include crates/contextdb *
+recursive-include context_lite_db/bin *

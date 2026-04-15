@@ -42,6 +42,9 @@ docs = [
 where = ["."]
 include = ["context_lite_db*", "ContextDB*"]
 
+[tool.setuptools.package-data]
+context_lite_db = ["bin/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

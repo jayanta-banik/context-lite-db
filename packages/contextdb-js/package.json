@@ -1,0 +1,19 @@
+{
+  "name": "contextdb-js",
+  "version": "0.1.0",
+  "description": "Node.js client for the standalone ContextDB Rust engine",
+  "main": "index.js",
+  "scripts": {
+    "postinstall": "node postinstall.js",
+    "test": "node test.js"
+  },
+  "keywords": [
+    "contextdb",
+    "sqlite",
+    "database",
+    "prisma-inspired"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs"
+}

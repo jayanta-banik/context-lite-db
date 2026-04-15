@@ -14,6 +14,7 @@ no external infrastructure required.
 | Capability | Description |
 |---|---|
 | **Relational** | Full SQLite access + Prisma-style `db.table.create(...)` API |
+| **Standalone core** | Rust-powered `contextdb` binary for bash, Python, and Node.js workflows |
 | **Semantic search** | Store document embeddings as SQLite BLOBs; query by cosine similarity |
 | **Knowledge graph** | Triple-store (subject / predicate / object) with BFS traversal |
 | **RAG** | Chunk-and-embed ingestion, retrieval, context assembly, and end-to-end LLM integration |
@@ -29,6 +30,17 @@ pip install context-lite-db
 # Optional: use the built-in sentence-transformers embedding provider
 pip install sentence-transformers
 ```
+
+```bash
+cd packages/contextdb-js
+npm install
+```
+
+The repository now includes:
+
+- `contextdb` – the standalone Rust database/CLI
+- `context-lite-db` – the Python client
+- `packages/contextdb-js` – the Node.js client
 
 ---
 
@@ -86,6 +98,36 @@ db.notes.drop()                # drop the table
 db.drop_table("notes")         # same, from DB level
 db.truncate_table("notes")     # same, from DB level
 db.seed_table("notes", [...])  # same, from DB level
+```
+
+### Prisma-inspired `context.schema`
+
+```prisma
+model notes {
+  id        Int      @id
+  title     String
+  body      String?
+  published Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([title], name: "idx_notes_title")
+}
+```
+
+```python
+from ContextDB import ContextDB
+
+db = ContextDB("context.db", embedding_provider="callable", embedding_fn=lambda text: [0.0])
+db.apply_schema("context.schema")
+db.notes.create({"title": "Hello", "body": "World", "published": True})
+```
+
+### Bash / CLI access
+
+```bash
+cargo run --manifest-path crates/contextdb/Cargo.toml -- schema apply --db ./context.db --schema ./context.schema
+cargo run --manifest-path crates/contextdb/Cargo.toml -- inspect --db ./context.db
+cargo run --manifest-path crates/contextdb/Cargo.toml -- query --db ./context.db --sql "SELECT * FROM notes"
 ```
 
 ### Raw SQL (always available)
