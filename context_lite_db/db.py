@@ -1,15 +1,19 @@
 """
 context_lite_db – core database module.
 
-:class:`ContextLiteDB` is the single entry-point for all operations:
+:class:`ContextDB` is the single entry-point for all operations:
 
 * **Relational** – plain SQL via ``execute`` / ``query``, plus convenience
   helpers ``create_table``, ``insert``, ``update``, ``delete``.
+* **Prisma-style table access** – ``db.table_name.create(...)``,
+  ``db.table_name.find_all()``, etc.
 * **Semantic search** – ``add_document`` + ``semantic_search``.
 * **Knowledge graph** – ``add_triple``, ``remove_triple``, ``graph_query``,
   ``graph_traverse``.
 * **RAG** – ``rag`` property returns a :class:`~context_lite_db.rag.RAGEngine`
   pre-wired to this database instance.
+
+``ContextLiteDB`` is kept as a backwards-compatible alias.
 """
 
 from __future__ import annotations
@@ -20,12 +24,20 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from .embeddings import EmbeddingProvider
 from .knowledge_graph import KnowledgeGraph
 from .rag import RAGEngine
+from .table_proxy import TableProxy
 from .vector_store import VectorStore
 
 
-class ContextLiteDB:
+class ContextDB:
     """AI-native local database combining SQLite, semantic search, knowledge
     graphs, and RAG in a single file-based store.
+
+    Supports Prisma-style table access via attribute lookup::
+
+        db = ContextDB("mydb.db")
+        db.create_table("users", {"name": "TEXT", "email": "TEXT"})
+        db.users.create({"name": "Alice", "email": "alice@example.com"})
+        db.users.find_all()
 
     Parameters
     ----------
@@ -44,10 +56,10 @@ class ContextLiteDB:
 
     Examples
     --------
-    >>> db = ContextLiteDB(":memory:", embedding_provider="callable",
-    ...                    embedding_fn=lambda t: [0.0] * 8)
+    >>> db = ContextDB(":memory:", embedding_provider="callable",
+    ...                embedding_fn=lambda t: [0.0] * 8)
     >>> db.create_table("notes", {"title": "TEXT", "body": "TEXT"})
-    >>> db.insert("notes", {"title": "Hello", "body": "World"})
+    >>> db.notes.create({"title": "Hello", "body": "World"})
     >>> db.add_triple("Alice", "wrote", "Hello")
     >>> db.add_document("doc1", "Hello World", metadata={"author": "Alice"})
     >>> results = db.semantic_search("greeting")
@@ -74,10 +86,24 @@ class ContextLiteDB:
         self._rag_engine: Optional[RAGEngine] = None
 
     # ------------------------------------------------------------------
+    # Prisma-style table attribute access
+    # ------------------------------------------------------------------
+
+    def __getattr__(self, name: str) -> TableProxy:
+        """Return a :class:`~context_lite_db.table_proxy.TableProxy` for *name*.
+
+        Called only when normal attribute lookup fails, so existing methods
+        and properties are never shadowed.
+        """
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return TableProxy(self, name)
+
+    # ------------------------------------------------------------------
     # Context-manager support
     # ------------------------------------------------------------------
 
-    def __enter__(self) -> "ContextLiteDB":
+    def __enter__(self) -> "ContextDB":
         return self
 
     def __exit__(self, *_: Any) -> None:
@@ -335,6 +361,40 @@ class ContextLiteDB:
         return self._graph.list_predicates()
 
     # ------------------------------------------------------------------
+    # Table-level helpers (accessible on the DB instance directly)
+    # ------------------------------------------------------------------
+
+    def drop_table(self, table: str) -> None:
+        """Drop *table* from the database (irreversible).
+
+        Equivalent to ``db.<table>.drop()``.
+        """
+        self.execute(f"DROP TABLE IF EXISTS {table}")
+
+    def truncate_table(self, table: str) -> None:
+        """Delete every row in *table* without dropping the schema.
+
+        Equivalent to ``db.<table>.truncate()``.
+        """
+        self.execute(f"DELETE FROM {table}")
+
+    def seed_table(
+        self,
+        table: str,
+        rows: List[Dict[str, Any]],
+    ) -> List[int]:
+        """Bulk-insert *rows* into *table* as initial seed data.
+
+        Equivalent to ``db.<table>.seed_table(rows)``.
+
+        Returns
+        -------
+        list[int]
+            The auto-assigned *id* for each inserted row.
+        """
+        return TableProxy(self, table).create_many(rows)
+
+    # ------------------------------------------------------------------
     # RAG
     # ------------------------------------------------------------------
 
@@ -344,3 +404,7 @@ class ContextLiteDB:
         if self._rag_engine is None:
             self._rag_engine = RAGEngine(self)
         return self._rag_engine
+
+
+#: Backwards-compatible alias.  Prefer :class:`ContextDB`.
+ContextLiteDB = ContextDB

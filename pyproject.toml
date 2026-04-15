@@ -32,10 +32,15 @@ dev = [
     "pytest>=7.0",
     "sentence-transformers>=2.0",
 ]
+docs = [
+    "mkdocs>=1.5",
+    "mkdocs-material>=9.0",
+    "mkdocstrings[python]>=0.24",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["context_lite_db*"]
+include = ["context_lite_db*", "ContextDB*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

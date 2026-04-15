@@ -5,13 +5,15 @@ built-in support for **semantic search**, **knowledge graphs**, and
 **retrieval-augmented generation (RAG)** – all in a single Python package with
 no external infrastructure required.
 
+📚 **[Documentation](https://jayanta-banik.github.io/context-lite-db/)**
+
 ---
 
 ## Features
 
 | Capability | Description |
 |---|---|
-| **Relational** | Full SQLite access via a clean Python API (`create_table`, `insert`, `query`, `update`, `delete`, raw SQL) |
+| **Relational** | Full SQLite access + Prisma-style `db.table.create(...)` API |
 | **Semantic search** | Store document embeddings as SQLite BLOBs; query by cosine similarity |
 | **Knowledge graph** | Triple-store (subject / predicate / object) with BFS traversal |
 | **RAG** | Chunk-and-embed ingestion, retrieval, context assembly, and end-to-end LLM integration |
@@ -33,24 +35,66 @@ pip install sentence-transformers
 ## Quick start
 
 ```python
-from context_lite_db import ContextLiteDB
+from ContextDB import ContextDB           # install: pip install context-lite-db
 
-db = ContextLiteDB("mydb.db")           # or ":memory:" for tests
+db = ContextDB("mydb.db")                 # or ":memory:" for tests
 ```
 
-### Relational operations
+### Prisma-style table access
 
 ```python
 db.create_table("notes", {"title": "TEXT", "body": "TEXT"})
 
-db.insert("notes", {"title": "Hello", "body": "World"})
-db.insert("notes", {"title": "Goodbye", "body": "World"})
+# Create
+db.notes.create({"title": "Hello", "body": "World"})
 
+# Create many (single transaction)
+db.notes.create_many([
+    {"title": "Note 2", "body": "..."},
+    {"title": "Note 3", "body": "..."},
+])
+
+# Seed a table with initial data
+db.notes.seed_table([{"title": "Seed note", "body": "..."}])
+
+# Read
+all_notes = db.notes.find_all()
+some_notes = db.notes.find_many("title LIKE ?", ["%Hello%"])
+one_note   = db.notes.find_first("title = ?", ["Hello"])
+
+# Update
+db.notes.update({"body": "Updated"}, where="title = ?", params=["Hello"])
+
+# Batch update (multiple WHERE clauses in one transaction)
+db.notes.update_many([
+    {"data": {"body": "A"}, "where": "title = ?", "params": ["Note 2"]},
+    {"data": {"body": "B"}, "where": "title = ?", "params": ["Note 3"]},
+])
+
+# Delete
+db.notes.delete("title = ?", ["Hello"])
+
+# Batch delete
+db.notes.delete_many([
+    {"where": "title = ?", "params": ["Note 2"]},
+    {"where": "title = ?", "params": ["Note 3"]},
+])
+
+# Table-level operations
+db.notes.truncate()            # remove all rows, keep schema
+db.notes.drop()                # drop the table
+db.drop_table("notes")         # same, from DB level
+db.truncate_table("notes")     # same, from DB level
+db.seed_table("notes", [...])  # same, from DB level
+```
+
+### Raw SQL (always available)
+
+```python
 rows = db.query("SELECT * FROM notes WHERE title = ?", ["Hello"])
+db.insert("notes", {"title": "Hello", "body": "World"})
 db.update("notes", {"title": "Hi"}, "title = ?", ["Hello"])
 db.delete("notes", "title = ?", ["Hi"])
-
-# Raw SQL is always available
 db.execute("CREATE INDEX IF NOT EXISTS idx_body ON notes(body)")
 ```
 
@@ -131,16 +175,16 @@ def openai_embed(text: str) -> list[float]:
     resp = openai.embeddings.create(model="text-embedding-3-small", input=text)
     return resp.data[0].embedding
 
-db = ContextLiteDB("mydb.db",
-                   embedding_provider="callable",
-                   embedding_fn=openai_embed)
+db = ContextDB("mydb.db",
+               embedding_provider="callable",
+               embedding_fn=openai_embed)
 ```
 
 ---
 
 ## API reference
 
-### `ContextLiteDB(path, embedding_provider, embedding_model, embedding_fn)`
+### `ContextDB(path, embedding_provider, embedding_model, embedding_fn)`
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -149,13 +193,17 @@ db = ContextLiteDB("mydb.db",
 | `embedding_model` | `"all-MiniLM-L6-v2"` | Model name for sentence-transformers |
 | `embedding_fn` | `None` | Custom `(str) -> list[float]` callable |
 
-**Relational**: `execute`, `query`, `create_table`, `insert`, `update`, `delete`
+**Prisma-style**: `db.<table>.create`, `create_many`, `find_all`, `find_many`, `find_first`, `update`, `update_many`, `delete`, `delete_many`, `truncate`, `drop`, `seed_table`
+
+**Relational**: `execute`, `query`, `create_table`, `insert`, `update`, `delete`, `drop_table`, `truncate_table`, `seed_table`
 
 **Semantic**: `add_document`, `semantic_search`, `delete_document`, `list_collections`
 
 **Graph**: `add_triple`, `remove_triple`, `graph_query`, `graph_neighbors`, `graph_traverse`, `list_entities`, `list_predicates`
 
 **RAG**: `db.rag.ingest`, `db.rag.retrieve`, `db.rag.build_context`, `db.rag.query`
+
+> Full API docs: <https://jayanta-banik.github.io/context-lite-db/>
 
 ---
 
@@ -171,13 +219,17 @@ pytest
 ## Project layout
 
 ```
+ContextDB/
+└── __init__.py          # Top-level importable package (import ContextDB)
 context_lite_db/
 ├── __init__.py          # Public API surface
-├── db.py                # ContextLiteDB – unified entry-point
+├── db.py                # ContextDB – unified entry-point
 ├── embeddings.py        # EmbeddingProvider (sentence-transformers / callable)
+├── table_proxy.py       # TableProxy – Prisma-style table CRUD
 ├── vector_store.py      # VectorStore – SQLite-backed cosine-similarity search
 ├── knowledge_graph.py   # KnowledgeGraph – triple-store with BFS traversal
 └── rag.py               # RAGEngine – chunk ingestion, retrieval, context assembly
+docs/                    # MkDocs source → GitHub Pages
 tests/
 examples/
     basic_usage.py
