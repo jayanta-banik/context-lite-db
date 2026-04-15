@@ -33,6 +33,7 @@ from .db import ContextDB, ContextLiteDB
 from .embeddings import EmbeddingProvider
 from .knowledge_graph import KnowledgeGraph
 from .rag import RAGEngine, chunk_text
+from .seed import SeedResult, load_seed
 from .table_proxy import TableProxy
 from .vector_store import VectorStore
 
@@ -42,9 +43,11 @@ __all__ = [
     "EmbeddingProvider",
     "KnowledgeGraph",
     "RAGEngine",
+    "SeedResult",
     "TableProxy",
     "VectorStore",
     "chunk_text",
+    "load_seed",
 ]
 
 __version__ = "0.1.0"

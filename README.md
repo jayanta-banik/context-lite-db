@@ -98,6 +98,40 @@ db.delete("notes", "title = ?", ["Hi"])
 db.execute("CREATE INDEX IF NOT EXISTS idx_body ON notes(body)")
 ```
 
+### Seed from a file
+
+`db.seed(path)` reads a JSON (or YAML) file and creates tables, inserts rows,
+adds knowledge-graph triples, and embeds documents in one declarative step:
+
+```json
+{
+  "tables": {
+    "users": {
+      "columns": {"name": "TEXT", "role": "TEXT"},
+      "rows": [
+        {"name": "Alice", "role": "engineer"},
+        {"name": "Bob",   "role": "designer"}
+      ]
+    }
+  },
+  "triples": [
+    {"subject": "Alice", "predicate": "manages", "object": "Bob"}
+  ],
+  "documents": [
+    {"doc_id": "bio_alice", "text": "Alice is a senior engineer.",
+     "collection": "bios"}
+  ]
+}
+```
+
+```python
+result = db.seed("seed.json")
+print(result.tables_created)   # ["users"]
+print(result.rows_inserted)    # {"users": 2}
+print(result.triples_added)    # 1
+print(result.documents_added)  # 1
+```
+
 ### Semantic search
 
 ```python
@@ -196,6 +230,8 @@ db = ContextDB("mydb.db",
 **Prisma-style**: `db.<table>.create`, `create_many`, `find_all`, `find_many`, `find_first`, `update`, `update_many`, `delete`, `delete_many`, `truncate`, `drop`, `seed_table`
 
 **Relational**: `execute`, `query`, `create_table`, `insert`, `update`, `delete`, `drop_table`, `truncate_table`, `seed_table`
+
+**Seed from file**: `db.seed(path)` → `SeedResult`
 
 **Semantic**: `add_document`, `semantic_search`, `delete_document`, `list_collections`
 

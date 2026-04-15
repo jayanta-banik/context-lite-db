@@ -51,12 +51,14 @@ nav:
   - Getting Started: getting-started.md
   - User Guide:
     - Relational Operations: guide/relational.md
+    - Seeding the Database: guide/seeding.md
     - Semantic Search: guide/semantic-search.md
     - Knowledge Graph: guide/knowledge-graph.md
     - RAG: guide/rag.md
   - API Reference:
     - ContextDB: api/context_db.md
     - TableProxy: api/table_proxy.md
+    - Seed Loader: api/seed.md
     - EmbeddingProvider: api/embeddings.md
     - VectorStore: api/vector_store.md
     - KnowledgeGraph: api/knowledge_graph.md

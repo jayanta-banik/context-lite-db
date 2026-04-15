@@ -24,9 +24,11 @@ from context_lite_db import (
     EmbeddingProvider,
     KnowledgeGraph,
     RAGEngine,
+    SeedResult,
     TableProxy,
     VectorStore,
     chunk_text,
+    load_seed,
 )
 from context_lite_db import __version__
 
@@ -36,8 +38,10 @@ __all__ = [
     "EmbeddingProvider",
     "KnowledgeGraph",
     "RAGEngine",
+    "SeedResult",
     "TableProxy",
     "VectorStore",
     "chunk_text",
+    "load_seed",
     "__version__",
 ]

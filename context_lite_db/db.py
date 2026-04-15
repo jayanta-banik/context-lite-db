@@ -12,6 +12,8 @@ context_lite_db – core database module.
   ``graph_traverse``.
 * **RAG** – ``rag`` property returns a :class:`~context_lite_db.rag.RAGEngine`
   pre-wired to this database instance.
+* **Seed from file** – ``db.seed(path)`` creates tables, inserts rows, adds
+  graph triples, and embeds documents from a JSON/YAML seed file.
 
 ``ContextLiteDB`` is kept as a backwards-compatible alias.
 """
@@ -24,6 +26,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from .embeddings import EmbeddingProvider
 from .knowledge_graph import KnowledgeGraph
 from .rag import RAGEngine
+from .seed import SeedResult, load_seed
 from .table_proxy import TableProxy
 from .vector_store import VectorStore
 
@@ -393,6 +396,68 @@ class ContextDB:
             The auto-assigned *id* for each inserted row.
         """
         return TableProxy(self, table).create_many(rows)
+
+    def seed(self, path: str) -> SeedResult:
+        """Seed the database from a JSON or YAML file.
+
+        The seed file is a declarative description of the initial database
+        state.  It can create tables, insert rows, add knowledge-graph
+        triples, and embed documents into the vector store – all in a single
+        call.
+
+        Parameters
+        ----------
+        path:
+            Path to the seed file (``.json``, ``.yaml``, or ``.yml``).
+
+        Returns
+        -------
+        SeedResult
+            Summary of what was created/inserted.
+
+        Seed file format (JSON)
+        -----------------------
+        All sections are optional.
+
+        .. code-block:: json
+
+            {
+              "tables": {
+                "users": {
+                  "columns": {"name": "TEXT", "email": "TEXT"},
+                  "rows": [
+                    {"name": "Alice", "email": "alice@example.com"},
+                    {"name": "Bob",   "email": "bob@example.com"}
+                  ]
+                }
+              },
+              "triples": [
+                {"subject": "Alice", "predicate": "knows", "object": "Bob"}
+              ],
+              "documents": [
+                {"doc_id": "doc1", "text": "Alice is an engineer.",
+                 "collection": "bios"}
+              ]
+            }
+
+        Examples
+        --------
+        >>> import json, tempfile, os
+        >>> seed = {"tables": {"items": {"columns": {"name": "TEXT"},
+        ...                              "rows": [{"name": "alpha"}]}}}
+        >>> with tempfile.NamedTemporaryFile(mode="w", suffix=".json",
+        ...                                  delete=False) as f:
+        ...     json.dump(seed, f); path = f.name
+        >>> db = ContextDB(":memory:", embedding_provider="callable",
+        ...                embedding_fn=lambda t: [0.0])
+        >>> result = db.seed(path)
+        >>> result.tables_created
+        ['items']
+        >>> result.rows_inserted
+        {'items': 1}
+        >>> os.unlink(path)
+        """
+        return load_seed(self, path)
 
     # ------------------------------------------------------------------
     # RAG
