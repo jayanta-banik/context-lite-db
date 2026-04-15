@@ -1,0 +1,26 @@
+Metadata-Version: 2.4
+Name: context-lite-db
+Version: 0.1.0
+Summary: An AI-native local database combining SQLite with semantic search, knowledge graphs, and RAG
+License: MIT
+Keywords: database,sqlite,vector-search,knowledge-graph,rag,ai,semantic-search
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Database
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.24
+Provides-Extra: sentence-transformers
+Requires-Dist: sentence-transformers>=2.0; extra == "sentence-transformers"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: sentence-transformers>=2.0; extra == "dev"
+
+# context-lite-db
